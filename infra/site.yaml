@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: new website creation template
+
+Parameters:
+  BucketName:
+    Description: Bucket Name for site
+    Type: String
+    Default: 'uma-profile-bucket'
+  DefaultRootObject:
+    Description: Default root object.
+    Type: String
+    Default: index.html
+
+Resources:
+  CDNS3AccessId:
+    Type: 'AWS::CloudFront::CloudFrontOriginAccessIdentity'
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment:  'This Distribution of mysite app'
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        -
+          Key: type
+          Value: website
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFrontAccess
+            Effect: 'Allow'
+            Action: 
+              - s3:GetObject
+              - s3:ListBucket
+            Principal:
+              AWS:
+                !Sub 'arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CDNS3AccessId}'
+            Resource: 
+              - !Sub '${S3Bucket.Arn}/*'
+              - !Sub '${S3Bucket.Arn}'
+  CloudFrontDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: !Ref DefaultRootObject
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - DomainName: !Sub '${S3Bucket}.s3.amazonaws.com'
+            Id: s3origin
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CDNS3AccessId}'
+        DefaultCacheBehavior:
+          TargetOriginId: 's3origin'
+          DefaultTTL: 300 #if you want to avoid frequently fetching from S3, keep max
+          MaxTTL: 280000
+          MinTTL: 0
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          TrustedSigners: [self]
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403 # Access denied
+            ResponseCode: 200
+            ResponsePagePath: '/login.html'
+          - ErrorCode: 404 # not found
+            ResponseCode: 404
+            ResponsePagePath: '/index.html'
+Outputs:
+  S3BucketName:
+    Description: S3 bucket used for artifacts
+    Value: !Ref S3Bucket
+  CDN:
+    Description: CloudFront Distribution
+    Value: !Ref CloudFrontDistribution

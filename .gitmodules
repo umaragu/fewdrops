@@ -1,0 +1,6 @@
+[submodule "themes/mediumish-gohugo-theme"]
+	path = themes/mediumish-gohugo-theme
+	url = https://github.com/lgaida/mediumish-gohugo-theme
+[submodule "themes/syna"]
+	path = themes/syna
+	url = https://git.okkur.org/syna

@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Continuous deployment infrastructure for sample calculator application
+
+Parameters:
+  CodeCommitRepoName:
+    Description: A CodeCommit repository that contains the application code. Must be in same region as this stack.
+    Type: String
+    Default: aws-codebuild-samples
+  BuildTriggerLambdaName:
+    Description: A CodeCommit repository that contains the application code. Must be in same region as this stack.
+    Type: String
+    Default: aws-codebuild-samples
+  CodeBucket:
+    Description: A CodeCommit repository that contains the application code. Must be in same region as this stack.
+    Type: String
+    Default: aws-codebuild-samples
+  CodePath:
+    Description: A CodeCommit repository that contains the application code. Must be in same region as this stack.
+    Type: String
+    Default: aws-codebuild-samples
+  Environment:
+    Description: A CodeCommit repository that contains the application code. Must be in same region as this stack.
+    Type: String
+    Default: aws-codebuild-samples
+
+Resources:
+  CodeCommitRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Ref CodeCommitRepoName
+      RepositoryDescription: !Sub 'Repo created through Service catalog'
+      Code:
+        S3:
+          Bucket: !Ref CodeBucket
+          Key: !Ref CodePath
+      Triggers:
+      - Name: !Join ["-", [!Ref CodeCommitRepoName, !Ref BuildTriggerLambdaName]]
+        CustomData: !Sub '${CodeCommitRepoName}-codebuild'
+        DestinationArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${BuildTriggerLambdaName}'
+        Branches:
+        - Master
+        - Stage
+        Events:
+        - updateReference
+  CodeCommitRepoLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - CodeCommitRepo
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BuildTriggerLambdaName
+      Principal: 'codecommit.amazonaws.com'
+      SourceArn: !GetAtt CodeCommitRepo.Arn
+
+  CodeBuildRole:
+    Description: CodeBuild Service role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+      Path: /
+      RoleName: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - CodeBuild
+    Type: AWS::IAM::Role
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+    - CodeBuildPolicy
+    Properties:
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Description: !Join
+        - ''
+        - - 'CodeBuild Project for '
+          - !Ref 'AWS::StackName'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:8.11.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: DEPLOYMENT_ENVIRONMENT
+            Type: PlainText
+            Value: !Ref 'Environment'
+      Name: !Sub '${CodeCommitRepoName}-codebuild'
+      ServiceRole: !Ref 'CodeBuildRole'
+      Source:
+        Type: CODECOMMIT
+        Location: !GetAtt [CodeCommitRepo, CloneUrlHttp]
+        BuildSpec: 'buildspec.yml'
+  CodeBuildPolicy:
+    Description: Setting IAM policy for service role for CodeBuild
+    Properties:
+      PolicyDocument:
+        Statement:
+        - Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Effect: Allow
+          Resource: '*'
+        - Action:
+          - s3:PutObject
+          - s3:GetObject
+          - s3:GetObjectVersion
+          Effect: Allow
+          Resource:
+          - !Join
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref 'ArtifactsBucket'
+          - !Join
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref 'ArtifactsBucket'
+              - /*
+          - !Join
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref 'CacheBucket'
+          - !Join
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref 'CacheBucket'
+              - /*
+        - Action:
+          - codecommit:GitPull
+          Effect: Allow
+          Resource:
+          - !Join
+            - ':'
+            - - arn
+              - aws
+              - codecommit
+              - !Ref 'AWS::Region'
+              - !Ref 'AWS::AccountId'
+              - !Ref CodeCommitRepoName
+        - Action:
+          - kms:GenerateDataKey*
+          - kms:Encrypt
+          - kms:Decrypt
+          Effect: Allow
+          Resource:
+          - !Join
+            - ':'
+            - - arn:aws:kms
+              - !Ref 'AWS::Region'
+              - !Ref 'AWS::AccountId'
+              - !Join
+                - /
+                - - alias
+                  - aws/s3
+      PolicyName: !Join
+        - '-'
+        -  - !Ref 'AWS::StackName'
+           - CodeBuildPolicy
+      Roles:
+      - !Ref 'CodeBuildRole'
+    Type: AWS::IAM::Policy
+Outputs:
+  CodeCommitRepoName:
+    Description: S3 bucket used for artifacts
+    Value: !Ref CodeCommitRepo
